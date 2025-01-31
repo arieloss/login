@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messages Privés</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .chat-container {
+            height: 500px;
+            border: 1px solid #ddd;
+        }
+        .messages-list {
+            height: 400px;
+            overflow-y: auto;
+        }
+        #search-results {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row">
+            <!-- Recherche d'utilisateurs -->
+            <div class="col-md-4">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        Rechercher des utilisateurs
+                    </div>
+                    <div class="card-body">
+                        <input type="text" id="user-search" class="form-control" placeholder="Rechercher par nom ou email">
+                        <div id="search-results" class="mt-2">
+                            <!-- Les résultats de recherche seront affichés ici -->
+                        </div>
+                    </div>
+                </div>
+            <!-- Liste des contacts/conversations existante -->
+            <div class="card">
+                <div class="card-header">
+                    Conversations
+                </div>
+                <div class="list-group list-group-flush">
+                    {% for contact in contacts %}
+                    <a href="/dm/{{ contact.id }}" class="list-group-item list-group-item-action">
+                        <img src="{{ contact.profile_image or '/static/default-avatar.png' }}" 
+                             class="rounded-circle" width="40" height="40">
+                        {{ contact.username }}
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+            <!-- Zone de chat -->
+            <div class="col-md-8">
+                <div class="card chat-container">
+                    <div class="card-header">
+                        {% if recipient %}
+                            Chat avec {{ recipient.username }}
+                        {% else %}
+                            Sélectionnez un contact
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Zone des messages -->
+                    <div class="card-body messages-list" id="messages-container">
+                        {% if messages %}
+                            {% for message in messages %}
+                            <div class="mb-3 {% if message.sender_id == current_user.id %}text-end{% else %}text-start{% endif %}">
+                                <div class="d-inline-block p-2 rounded {% if message.sender_id == current_user.id %}bg-primary text-white{% else %}bg-light{% endif %}">
+                                    {% if message.message_type == 'text' %}
+                                        {{ message.content }}
+                                    {% elif message.message_type == 'image' %}
+                                        <img src="{{ message.file_path }}" class="img-fluid" style="max-width: 200px;">
+                                    {% elif message.message_type == 'video' %}
+                                        <video controls style="max-width: 200px;">
+                                            <source src="{{ message.file_path }}" type="video/mp4">
+                                        </video>
+                                    {% endif %}
+                                    <small class="d-block text-muted {% if message.sender_id == current_user.id %}text-white-50{% endif %}">
+                                        {{ message.created_at }}
+                                    </small>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="text-center text-muted mt-5">
+                                Sélectionnez un contact pour commencer à discuter
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Formulaire d'envoi de message -->
+                    <div class="card-footer">
+                        {% if recipient %}
+                        <form id="message-form" enctype="multipart/form-data">
+                            <div class="input-group">
+                                <input type="text" class="form-control" name="message" placeholder="Votre message...">
+                                <input type="file" class="form-control" name="file" accept="image/*,video/*" style="display:none;" id="file-input">
+                                <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('file-input').click()">
+                                    <i class="bi bi-paperclip"></i>
+                                </button>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-send"></i> Envoyer
+                                </button>
+                            </div>
+                        </form>
+                        {% else %}
+                        <div class="text-center text-muted">
+                            Sélectionnez un contact pour envoyer un message
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Websocket pour messages en temps réel
+    const userId = {{ current_user.id }};
+    const websocket = new WebSocket(`/ws/${userId}`);
+
+    websocket.onmessage = function(event) {
+        const messageData = JSON.parse(event.data);
+        
+        // Créer l'élément de message en fonction du type
+        const messageContainer = document.getElementById('messages-container');
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('mb-3');
+        messageElement.classList.add(messageData.sender_id === userId ? 'text-end' : 'text-start');
+
+        let messageContent = '';
+        switch(messageData.message_type) {
+            case 'text':
+                messageContent = `<div class="d-inline-block p-2 rounded ${messageData.sender_id === userId ? 'bg-primary text-white' : 'bg-light'}">
+                    ${messageData.content}
+                    <small class="d-block text-muted ${messageData.sender_id === userId ? 'text-white-50' : ''}">
+                        ${messageData.created_at}
+                    </small>
+                </div>`;
+                break;
+            
+            case 'image':
+                messageContent = `<div class="d-inline-block p-2 rounded ${messageData.sender_id === userId ? 'bg-primary text-white' : 'bg-light'}">
+                    <img src="${messageData.file_path}" class="img-fluid" style="max-width: 200px;">
+                    <small class="d-block text-muted ${messageData.sender_id === userId ? 'text-white-50' : ''}">
+                        ${messageData.created_at}
+                    </small>
+                </div>`;
+                break;
+            
+            case 'video':
+                messageContent = `<div class="d-inline-block p-2 rounded ${messageData.sender_id === userId ? 'bg-primary text-white' : 'bg-light'}">
+                    <video controls style="max-width: 200px;">
+                        <source src="${messageData.file_path}" type="video/mp4">
+                    </video>
+                    <small class="d-block text-muted ${messageData.sender_id === userId ? 'text-white-50' : ''}">
+                        ${messageData.created_at}
+                    </small>
+                </div>`;
+                break;
+            
+            case 'emoji':
+                messageContent = `<div class="d-inline-block p-2 rounded ${messageData.sender_id === userId ? 'bg-primary text-white' : 'bg-light'}">
+                    ${messageData.content}
+                    <small class="d-block text-muted ${messageData.sender_id === userId ? 'text-white-50' : ''}">
+                        ${messageData.created_at}
+                    </small>
+                </div>`;
+                break;
+            
+            case 'sticker':
+                messageContent = `<div class="d-inline-block p-2 rounded ${messageData.sender_id === userId ? 'bg-primary text-white' : 'bg-light'}">
+                    <img src="${messageData.content}" class="img-fluid" style="max-width: 100px;">
+                    <small class="d-block text-muted ${messageData.sender_id === userId ? 'text-white-50' : ''}">
+                        ${messageData.created_at}
+                    </small>
+                </div>`;
+                break;
+        }
+
+        messageElement.innerHTML = messageContent;
+        messageContainer.appendChild(messageElement);
+        
+        // Scroll automatique vers le bas
+        messageContainer.scrollTop = messageContainer.scrollHeight;
+    };
+
+        // Fonction de recherche d'utilisateurs
+    const userSearchInput = document.getElementById('user-search');
+    const searchResultsContainer = document.getElementById('search-results');
+
+    userSearchInput.addEventListener('input', async (e) => {
+        const query = e.target.value;
+        
+        if (query.length < 2) {
+            searchResultsContainer.innerHTML = '';
+            return;
+        }
+
+        try {
+            const response = await fetch(`/search-users?query=${query}`);
+            const data = await response.json();
+            
+            // Afficher les résultats de recherche
+            searchResultsContainer.innerHTML = data.users.map(user => `
+                <div class="list-group-item list-group-item-action d-flex align-items-center">
+                    <img src="${user.profile_image || '/static/default-avatar.png'}" 
+                         class="rounded-circle me-3" width="40" height="40">
+                    <div>
+                        <strong>${user.username}</strong>
+                        <small class="d-block text-muted">${user.email}</small>
+                    </div>
+                    <a href="/dm/${user.id}" class="btn btn-sm btn-primary ms-auto">
+                        Message
+                    </a>
+                </div>
+            `).join('');
+        } catch (error) {
+            console.error('Erreur de recherche:', error);
+            searchResultsContainer.innerHTML = '<div class="text-danger">Erreur de recherche</div>';
+        }
+    });
+    {% if recipient %}
+    document.getElementById('message-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        formData.append('receiver_id', '{{ recipient.id }}');
+        
+        // Détection du type de message
+        const messageInput = e.target.querySelector('input[name="message"]');
+        const fileInput = e.target.querySelector('input[name="file"]');
+        
+        if (fileInput.files.length > 0) {
+            // Type de fichier (image/vidéo)
+            formData.append('message_type', fileInput.files[0].type.startsWith('image') ? 'image' : 'video');
+        } else {
+            // Text simple
+            formData.append('message_type', 'text');
+        }
+    
+        try {
+            const response = await fetch('/send-dm', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            // Réinitialiser le formulaire
+            e.target.reset();
+        } catch (error) {
+            console.error('Erreur:', error);
+        }
+    });
+    {% endif %}
+    </script>
+</body>
+</html>
